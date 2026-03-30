@@ -6,6 +6,7 @@ from PIL import Image
 import tempfile
 import os
 import sys
+import io
 
 # Add src to sys.path for internal imports
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
@@ -66,8 +67,8 @@ with st.sidebar:
         # 1. Image upload
         st.subheader("Satellite Images")
         uploaded_files = st.file_uploader(
-            "Upload PNG / JPG images",
-            type=['png', 'jpg', 'jpeg'],
+            "Upload PNG / JPG / TIF images",
+            type=['png', 'jpg', 'jpeg', 'tif', 'tiff'],
             accept_multiple_files=True
         )
 
@@ -194,7 +195,9 @@ if mode == "🚀 Live Demo (CV)":
                     st.image(image, use_container_width=True)
 
                     # Save temp file for CV processing
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                    ext = os.path.splitext(uploaded_file.name)[1].lower()
+                    if not ext: ext = ".png"
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                         tmp.write(uploaded_file.getbuffer())
                         tmp_path = tmp.name
 
@@ -308,14 +311,260 @@ if mode == "🚀 Live Demo (CV)":
                                 st.caption(rec["reason"])
                                 st.markdown("---")
 
-                            csv = pd.DataFrame(res["recs"]).to_csv(index=False).encode("utf-8")
-                            st.download_button("⬇️ Download Report CSV", csv,
-                                               file_name=f"report_{fname}.csv", mime="text/csv")
+                            # Generate Excel Report
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                pd.DataFrame(res["recs"]).to_excel(writer, index=False, sheet_name="Recommendations")
+                                pd.DataFrame([res["cv_stats"]]).to_excel(writer, index=False, sheet_name="Land Cover Stats")
+                            
+                            st.download_button(
+                                "⬇️ Download Excel Report", 
+                                excel_buffer.getvalue(),
+                                file_name=f"report_{fname}.xlsx", 
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
 
 else:
     # ── SCIENTIFIC MODE (New Logic) ──
     st.header("🔬 Scientific Analysis Results (Mode B)")
-    st.markdown("Displays outputs from the **ESA WorldCover Deep Learning Model** pipeline.")
+    st.markdown("Run the **ESA WorldCover Deep Learning Model** pipeline natively.")
+
+    # ── Band Stacking Helper ──────────────────────────────────────
+    def stack_band_files(band_files_dict):
+        """
+        Stack individual single-band GeoTIFF files into one multi-band GeoTIFF.
+
+        Parameters
+        ----------
+        band_files_dict : dict
+            Ordered dict of label -> UploadedFile, e.g.
+            {"B02 (Blue)": <file>, "B03 (Green)": <file>, ...}
+            None values are skipped (optional bands).
+
+        Returns
+        -------
+        str : Path to the temporary stacked GeoTIFF.
+        """
+        import rasterio
+        from rasterio.enums import Resampling
+        import numpy as np
+
+        # Filter out None entries
+        valid_bands = [(label, f) for label, f in band_files_dict.items() if f is not None]
+        if not valid_bands:
+            raise ValueError("No band files provided.")
+
+        # Save each uploaded band to a temp file and open with rasterio
+        tmp_band_paths = []
+        for label, uploaded in valid_bands:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as tmp:
+                tmp.write(uploaded.getbuffer())
+                tmp_band_paths.append(tmp.name)
+
+        # Read first band to get reference shape & profile
+        with rasterio.open(tmp_band_paths[0]) as ref:
+            ref_shape = (ref.height, ref.width)
+            ref_profile = ref.profile.copy()
+
+        # Build output profile for N-band stack
+        out_profile = ref_profile.copy()
+        out_profile.update(count=len(valid_bands), dtype="float32")
+
+        # Write stacked output
+        stacked_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tif")
+        stacked_path = stacked_tmp.name
+        stacked_tmp.close()
+
+        with rasterio.open(stacked_path, "w", **out_profile) as dst:
+            for i, (band_path, (label, _)) in enumerate(
+                zip(tmp_band_paths, valid_bands), start=1
+            ):
+                with rasterio.open(band_path) as src:
+                    if (src.height, src.width) == ref_shape:
+                        data = src.read(1).astype("float32")
+                    else:
+                        # Resample to match reference dimensions
+                        # out_shape for single-band read must be (1, rows, cols)
+                        data = src.read(
+                            1,
+                            out_shape=(1, ref_shape[0], ref_shape[1]),
+                            resampling=Resampling.bilinear,
+                        ).squeeze().astype("float32")
+                    dst.write(data, i)
+
+        # Cleanup temp individual band files
+        for p in tmp_band_paths:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+        return stacked_path
+    # ─────────────────────────────────────────────────────────────
+
+    with st.expander("📂 Run New Analysis", expanded=True):
+
+        input_tab1, input_tab2 = st.tabs([
+            "📦 Single Stacked .tif",
+            "🗂️ Individual Bands (B02 / B03 / B04 / B08 / B11)"
+        ])
+
+        # ── Tab 1: Single stacked TIF (existing behaviour) ────────
+        with input_tab1:
+            st.info("Upload a pre-stacked multi-band Sentinel-2 `.tif` and a climate `.csv`.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                sci_sat_file = st.file_uploader(
+                    "Satellite Image (Sentinel-2 .tif)",
+                    type=["tif", "tiff"], key="sci_sat"
+                )
+            with col2:
+                sci_wc_file = st.file_uploader(
+                    "ESA WorldCover Map (.tif — optional)",
+                    type=["tif", "tiff"], key="sci_wc"
+                )
+            with col3:
+                sci_clim_file = st.file_uploader(
+                    "Climate Data (.csv)",
+                    type=["csv"], key="sci_clim"
+                )
+
+            if st.button("🚀 Run AI Pipeline", type="primary", key="run_single"):
+                if sci_sat_file is None or sci_clim_file is None:
+                    st.error("❌ Satellite `.tif` and Climate `.csv` are required.")
+                else:
+                    with st.spinner("🤖 Running AI Pipeline… Please wait."):
+                        try:
+                            from src.main import main as run_pipeline
+
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as f1:
+                                f1.write(sci_sat_file.getbuffer())
+                                sat_path = f1.name
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f2:
+                                f2.write(sci_clim_file.getbuffer())
+                                clim_path = f2.name
+
+                            wc_path = None
+                            if sci_wc_file:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as f3:
+                                    f3.write(sci_wc_file.getbuffer())
+                                    wc_path = f3.name
+
+                            run_pipeline(
+                                satellite_path=sat_path,
+                                climate_path=clim_path,
+                                worldcover_path=wc_path,
+                                grid_size=50,
+                            )
+                            st.success("✅ Analysis Complete! Scroll down for results.")
+                        except Exception as e:
+                            st.error(f"Pipeline failed: {e}")
+                            st.exception(e)
+
+        # ── Tab 2: Individual band uploads → auto-stack ────────────
+        with input_tab2:
+            st.info(
+                "Upload each Sentinel-2 band as a **separate single-band `.tif`** file. "
+                "They will be automatically stacked into a multi-band image before the pipeline runs.\n\n"
+                "**Required:** B02, B03, B04, B08 &nbsp;|&nbsp; **Optional:** B11 (SWIR)"
+            )
+
+            st.markdown("#### 📡 Sentinel-2 Band Files")
+            bc1, bc2, bc3 = st.columns(3)
+            bd1, bd2 = st.columns(2)
+
+            with bc1:
+                b02_file = st.file_uploader("B02 — Blue (490 nm) ✱", type=["tif", "tiff"], key="b02")
+            with bc2:
+                b03_file = st.file_uploader("B03 — Green (560 nm) ✱", type=["tif", "tiff"], key="b03")
+            with bc3:
+                b04_file = st.file_uploader("B04 — Red (665 nm) ✱", type=["tif", "tiff"], key="b04")
+            with bd1:
+                b08_file = st.file_uploader("B08 — NIR (842 nm) ✱", type=["tif", "tiff"], key="b08")
+            with bd2:
+                b11_file = st.file_uploader("B11 — SWIR (1610 nm) optional", type=["tif", "tiff"], key="b11")
+
+            st.markdown("#### 🗺️ Supporting Files")
+            be1, be2 = st.columns(2)
+            with be1:
+                bands_wc_file = st.file_uploader(
+                    "ESA WorldCover Map (.tif — optional)",
+                    type=["tif", "tiff"], key="bands_wc"
+                )
+            with be2:
+                bands_clim_file = st.file_uploader(
+                    "Climate Data (.csv) ✱",
+                    type=["csv"], key="bands_clim"
+                )
+
+            # Status indicators
+            required_bands = {"B02": b02_file, "B03": b03_file, "B04": b04_file, "B08": b08_file}
+            missing = [k for k, v in required_bands.items() if v is None]
+            if missing:
+                st.warning(f"⚠️ Still needed: **{', '.join(missing)}** band(s) and Climate CSV")
+            else:
+                st.success("✅ All required bands uploaded — ready to stack & run!")
+
+            if st.button("🔗 Stack Bands & Run AI Pipeline", type="primary", key="run_bands"):
+                if any(v is None for v in required_bands.values()):
+                    st.error(f"❌ Required bands missing: {', '.join(missing)}")
+                elif bands_clim_file is None:
+                    st.error("❌ Climate `.csv` is required.")
+                else:
+                    stacked_path = None  # ensure always defined
+                    with st.spinner("🔗 Stacking bands into multi-band GeoTIFF…"):
+                        try:
+                            # Stack bands in order: B02, B03, B04, B08, [B11]
+                            band_files_ordered = {
+                                "B02 (Blue)":  b02_file,
+                                "B03 (Green)": b03_file,
+                                "B04 (Red)":   b04_file,
+                                "B08 (NIR)":   b08_file,
+                                "B11 (SWIR)":  b11_file,   # None if not uploaded → skipped
+                            }
+                            stacked_path = stack_band_files(band_files_ordered)
+
+                            n_bands = 4 + (1 if b11_file else 0)
+                            st.success(
+                                f"✅ Stacked {n_bands} bands into a single GeoTIFF. "
+                                "Running AI pipeline…"
+                            )
+                        except Exception as e:
+                            st.error(f"Band stacking failed: {e}")
+                            st.exception(e)
+                            stacked_path = None
+
+                    if stacked_path:
+                        with st.spinner("🤖 Running AI Pipeline… Please wait."):
+                            try:
+                                from src.main import main as run_pipeline
+
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as fc:
+                                    fc.write(bands_clim_file.getbuffer())
+                                    clim_path = fc.name
+
+                                wc_path = None
+                                if bands_wc_file:
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as fw:
+                                        fw.write(bands_wc_file.getbuffer())
+                                        wc_path = fw.name
+
+                                run_pipeline(
+                                    satellite_path=stacked_path,
+                                    climate_path=clim_path,
+                                    worldcover_path=wc_path,
+                                    grid_size=50,
+                                )
+                                st.success("✅ Analysis Complete! Scroll down for results.")
+                            except Exception as e:
+                                st.error(f"Pipeline failed: {e}")
+                                st.exception(e)
+                            finally:
+                                # Cleanup stacked temp file
+                                try:
+                                    os.remove(stacked_path)
+                                except Exception:
+                                    pass
     
     # Path to output directory
     OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -369,13 +618,28 @@ else:
         with tab_raw:
             st.subheader("Download Results")
             if os.path.exists(rec_csv):
-                with open(rec_csv, "rb") as f:
+                # Read the CSV and convert it to Excel format for download
+                try:
+                    df_recs = pd.read_csv(rec_csv)
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        df_recs.to_excel(writer, index=False, sheet_name="Scientific Recommendations")
+                        
                     st.download_button(
-                        label="⬇️ Download Recommendation CSV",
-                        data=f,
-                        file_name="scientific_recommendations.csv",
-                        mime="text/csv"
+                        label="⬇️ Download Recommendations (Excel)",
+                        data=excel_buffer.getvalue(),
+                        file_name="scientific_recommendations.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
+                except Exception as e:
+                    # Fallback to CSV if conversion fails somehow
+                    with open(rec_csv, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download Recommendation CSV",
+                            data=f,
+                            file_name="scientific_recommendations.csv",
+                            mime="text/csv"
+                        )
             
             if os.path.exists(report_txt):
                 with open(report_txt, "rb") as f:

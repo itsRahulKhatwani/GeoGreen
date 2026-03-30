@@ -349,22 +349,8 @@ def generate_recommendations(zone_df):
 
 def generate_rgb_recommendations(cv_stats, climate_data):
     """
-    [CV-BASED] Generate recommendations using RGB computer vision stats and API climate data.
-
-    Parameters
-    ----------
-    cv_stats : dict
-        Land cover percentages from cv_analysis.py
-        {'Vegetation': 45.0, 'Water': 10.0, 'Built-up': 5.0, 'Bare/Sparse': 40.0}
-    climate_data : dict
-        Climate info from climate_api.py
-        {'annual_rainfall_mm': 1200, 'mean_temp_c': 25.0, ...}
-
-    Returns
-    -------
-    list
-        List of recommendation dictionaries.
-        [{ 'priority': 'High', 'action': '...', 'reason': '...' }]
+    [CV-BASED] Generate tailored recommendations based on land cover and climate data,
+    specifically answering ecosystem improvement, water bodies, urban reduction, and agriculture.
     """
     recs = []
     
@@ -376,66 +362,64 @@ def generate_rgb_recommendations(cv_stats, climate_data):
     rainfall = climate_data.get("annual_rainfall_mm", 0)
     temp = climate_data.get("mean_temp_c", 0)
 
-    # 1. Afforestation (High Priority)
-    # If meaningful bare soil exists and rainfall is decent
-    if bare_pct > 20 and rainfall > 800:
-        recs.append({
-            "priority": "High",
-            "action": "Afforestation (Native Species)",
-            "reason": f"Significant bare land ({bare_pct:.1f}%) with good rainfall ({rainfall}mm). Ideal for Teak/Sal.",
-            "type": "planting"
-        })
-    elif bare_pct > 20 and rainfall <= 800:
-        recs.append({
-            "priority": "High",
-            "action": "Drought-Resistant Planting",
-            "reason": f"Bare land ({bare_pct:.1f}%) in low rainfall zone. Use hardy species (Acacia, Neem).",
-            "type": "planting"
-        })
+    # 1. Ecosystem Improvement / Afforestation
+    if bare_pct > 15:
+        if rainfall > 800:
+            recs.append({
+                "priority": "High",
+                "action": "Ecosystem Improvement: Afforestation",
+                "reason": f"Significant bare land ({bare_pct:.1f}%). Improve the regional ecosystem by planting native species (like Teak or Sal) which thrive in good rainfall ({rainfall}mm). This will restore soil and local biodiversity.",
+                "type": "ecosystem"
+            })
+        else:
+            recs.append({
+                "priority": "High",
+                "action": "Ecosystem Improvement: Drought-Resistant Plantations",
+                "reason": f"Bare land ({bare_pct:.1f}%) in low rainfall zone. To improve the ecosystem and prevent desertification, plant hardy species like Neem, Babool, or Khejri.",
+                "type": "ecosystem"
+            })
 
-    # 2. Water Conservation (High/Medium Priority)
-    # If water bodies detected, protect them
-    if water_pct > 5:
+    # 2. Water Bodies Utilization
+    if water_pct > 2:
         recs.append({
             "priority": "High",
-            "action": "Wetland Conservation",
-            "reason": f"Water bodies detected ({water_pct:.1f}%). Maintain buffer zones to prevent encroachment.",
-            "type": "conservation"
+            "action": "Water Body Utilization & Conservation",
+            "reason": f"Water bodies detected ({water_pct:.1f}%). Best utilization: Integrate rainwater harvesting into nearby structures, implement periodic desilting to increase groundwater recharge, and create green buffer zones (planting native riparian vegetation) to prevent agricultural/urban runoff from polluting the water.",
+            "type": "water"
         })
-    elif water_pct > 0.5:
+    elif water_pct > 0.1:
         recs.append({
             "priority": "Medium",
             "action": "Water Body Rejuvenation",
-            "reason": "Small water bodies detected. Inspect for desilting potential.",
+            "reason": "Small, possibly seasonal water bodies detected. Consider micro-irrigation setups sourcing from this, and construct check dams to ensure water availability year-round.",
             "type": "water"
         })
 
-    # 3. Urban Greening (Medium Priority)
-    # If built-up area is significant
+    # 3. Urbanization & Pollution Reduction
     if built_pct > 15:
         recs.append({
-            "priority": "Medium",
-            "action": "Vertical Gardens / Green Roofs",
-            "reason": f"Urban/Built-up area detected ({built_pct:.1f}%). Mitigate heat island effect.",
+            "priority": "High",
+            "action": "Pollution Reduction via Urban Greening",
+            "reason": f"Highly urbanized region detected ({built_pct:.1f}%). To reduce air/noise pollution and the heat-island effect, mandate green roofs, vertical gardens on larger buildings, and plant pollution-absorbing native roadside trees (e.g., Peepal, Neem, Banyan).",
             "type": "urban"
         })
 
-    # 4. Agroforestry (Low/Medium Priority)
-    # If vegetation exists but isn't dominant (likely crops)
-    if veg_pct > 30 and veg_pct < 70:
+    # 4. Agricultural Land / Crop Rotation
+    # If there is moderate vegetation but it's not dense (likely cropland), or barren land that might be unutilized agriculture:
+    if veg_pct > 20 and veg_pct < 60:
         recs.append({
             "priority": "Medium",
-            "action": "Agroforestry Integration",
-            "reason": "Moderate vegetation suggests agriculture. Plant trees on field boundaries.",
-            "type": "agroforestry"
+            "action": "Crop Rotation & Agroforestry",
+            "reason": "Agricultural or sparse vegetation detected. Best practice: Adopt crop rotations utilizing leguminous crops (like pulses) to naturally restore soil nitrogen. For unutilized tracts, practice agroforestry by planting timber trees on the farm boundaries for dual-income and wind-breaks.",
+            "type": "agriculture"
         })
         
     # Default if nothing matches
     if not recs:
         recs.append({
             "priority": "Low",
-            "action": "Monitor Land Use",
-            "reason": "Balanced land cover detected. No immediate intervention required.",
+            "action": "Conservation & Monitoring",
+            "reason": "Diverse and highly vegetative land cover detected. Maintain current green coverage and monitor routinely. Support local biodiversity with minimal intervention.",
             "type": "general"
         })
         

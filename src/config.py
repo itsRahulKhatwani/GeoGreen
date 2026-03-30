@@ -53,6 +53,7 @@ BAND_ORDER = {
     "green": 2,   # Band 3 (B03) — 560 nm  — 10m
     "red":   3,   # Band 4 (B04) — 665 nm  — 10m
     "nir":   4,   # Band 8 (B08) — 842 nm  — 10m (Near-Infrared)
+    "swir":  5,   # Band 11 (B11) — 1610 nm — 20m (Short-Wave Infrared, optional)
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -154,34 +155,34 @@ ML_RECOMMENDATION_RULES = [
     # (ml_class, rainfall_min, rainfall_max, temp_min, temp_max, recommendation, priority)
 
     # Tree Cover (class 1) — Conservation
-    (1, 0,    9999, 0,  50, "Conservation & Biodiversity Monitoring", "Low"),
+    (1, 0,    9999, 0,  50, "Conservation: Maintain existing tree cover. No major intervention needed.", "Low"),
 
     # Shrubland (class 2) — Enhancement
-    (2, 800,  9999, 0,  40, "Afforestation (Upgrade to Tree Cover — Teak, Sal)", "High"),
-    (2, 500,  800,  0,  42, "Agroforestry Enhancement", "Medium"),
-    (2, 0,    500,  0,  50, "Drought-Resistant Shrub Enrichment", "Low"),
+    (2, 800,  9999, 0,  40, "Ecosystem Improvement: Upgrade to Tree Cover by planting high-rainfall native species (Teak, Sal) to improve biodiversity.", "High"),
+    (2, 500,  800,  0,  42, "Agroforestry: Enhance shrub-land with structured tree-planting on boundaries to improve soil health.", "Medium"),
+    (2, 0,    500,  0,  50, "Ecosystem Improvement: Enrich sparse shrubland with drought-resistant plants to prevent desertification.", "Low"),
 
     # Grassland (class 3) — Restoration
-    (3, 800,  9999, 0,  40, "Grassland → Forest Transition (Native Species)", "High"),
-    (3, 500,  800,  0,  42, "Grassland Restoration & Biodiversity Enhancement", "Medium"),
-    (3, 0,    500,  0,  50, "Grass Seeding + Micro-Irrigation", "Low"),
+    (3, 800,  9999, 0,  40, "Ecological Restoration: Transition grassland to forest using native species.", "High"),
+    (3, 500,  800,  0,  42, "Biodiversity Enhancement: Restore grassland boundaries to support local fauna.", "Medium"),
+    (3, 0,    500,  0,  50, "Soil Preservation: Grass seeding and micro-irrigation to maintain top-soil.", "Low"),
 
-    # Cropland (class 4) — Intervention based on NDVI health
-    (4, 800,  9999, 0,  40, "Agroforestry (Intercropping with Native Trees)", "Medium"),
-    (4, 500,  800,  0,  42, "Soil Health Intervention + Crop Rotation", "Medium"),
-    (4, 0,    500,  0,  50, "Drought-Resistant Crop Varieties + Water Harvesting", "High"),
+    # Cropland (class 4) — Crop Rotation & Agroforestry
+    (4, 800,  9999, 0,  40, "Agriculture: Intercross with native trees (Agroforestry) for dual-income and wind protection.", "Medium"),
+    (4, 500,  800,  0,  42, "Agriculture: Adopt crop rotation using leguminous crops to naturally restore soil nitrogen.", "Medium"),
+    (4, 0,    500,  0,  50, "Agriculture: Use drought-resistant crop varieties and integrate rainwater harvesting systems.", "High"),
 
-    # Built-up (class 5) — Urban greening
-    (5, 0,    9999, 0,  50, "Urban Greening (Rooftop Gardens, Road Plantations, Parks)", "Medium"),
+    # Built-up (class 5) — Urban Greening & Pollution Reduction
+    (5, 0,    9999, 0,  50, "Pollution Reduction: Implement vertical gardens, green rooftops, and plant native roadside trees (Neem, Peepal, Banyan) to absorb pollution and reduce the urban heat island effect.", "High"),
 
     # Bare / Sparse (class 6) — High priority greening
-    (6, 800,  9999, 0,  40, "Afforestation (Native Species — Neem, Banyan, Peepal)", "High"),
-    (6, 500,  800,  0,  42, "Agroforestry / Silvopasture", "High"),
-    (6, 300,  500,  0,  45, "Drought-Resistant Plantation (Babool, Khejri)", "Medium"),
-    (6, 0,    300,  0,  50, "Micro-Irrigation + Grass Seeding", "Low"),
+    (6, 800,  9999, 0,  40, "Ecosystem Improvement: Major afforestation drive with native species to restore bare land.", "High"),
+    (6, 500,  800,  0,  42, "Land Utilization: Implement Agroforestry / Silvopasture to regenerate degraded land.", "High"),
+    (6, 300,  500,  0,  45, "Ecosystem Improvement: Plant hardy drought-resistant species (Babool, Khejri) to bind soil.", "Medium"),
+    (6, 0,    300,  0,  50, "Land Utilization: Micro-irrigation combined with grass seeding to prevent soil erosion.", "Low"),
 
     # Water (class 7) — Conservation
-    (7, 0,    9999, 0,  50, "Wetland / Water Body Conservation", "Low"),
+    (7, 0,    9999, 0,  50, "Water Body Utilization: Implement periodic desilting to increase groundwater recharge, and create riparian green buffer zones to prevent agricultural and urban runoff from polluting the water.", "High"),
 ]
 
 # Legacy rule-based rules (kept for backward compatibility)

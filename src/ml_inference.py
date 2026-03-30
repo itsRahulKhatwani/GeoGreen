@@ -114,34 +114,19 @@ def reclassify_worldcover(raw_data):
     """
     Reclassify ESA WorldCover labels (10, 20, 30, ...) to project
     land-cover classes (1–7).
-
-    ESA WorldCover → Project Class Mapping:
-      10  (Tree cover)        → 1 (Tree Cover)
-      20  (Shrubland)         → 2 (Shrubland)
-      30  (Grassland)         → 3 (Grassland)
-      40  (Cropland)          → 4 (Cropland)
-      50  (Built-up)          → 5 (Built-up)
-      60  (Bare/sparse)       → 6 (Bare / Sparse)
-      70  (Snow/Ice)          → 6 (Bare / Sparse)
-      80  (Water)             → 7 (Water)
-      90  (Herbaceous wetland)→ 3 (Grassland)
-      95  (Mangroves)         → 3 (Grassland)
-      100 (Moss/lichen)       → 3 (Grassland)
-
-    Parameters
-    ----------
-    raw_data : numpy.ndarray
-        Raw WorldCover class values (e.g., 10, 20, 30, ...).
-
-    Returns
-    -------
-    numpy.ndarray
-        Reclassified array with project class IDs (0–7).
     """
     reclassified = np.zeros_like(raw_data, dtype=np.int8)
-
-    for esa_value, (project_class, _) in WORLDCOVER_CLASS_MAP.items():
-        reclassified[raw_data == esa_value] = project_class
+    
+    unique_vals = np.unique(raw_data)
+    max_val = np.max(unique_vals) if len(unique_vals) > 0 else 0
+    
+    # Auto-detect if the provided map is ALREADY using project classes (1-7) instead of ESA classes (10-100)
+    if max_val <= 10 and max_val > 0:
+        print("  ⚠️ Notice: The WorldCover map appears to already be classified directly into project classes (1-7) instead of ESA codes (10-100). Auto-bypassing mapping!")
+        reclassified = raw_data.astype(np.int8)
+    else:
+        for esa_value, (project_class, _) in WORLDCOVER_CLASS_MAP.items():
+            reclassified[raw_data == esa_value] = project_class
 
     # Print class distribution
     total = reclassified.size
@@ -384,15 +369,28 @@ def _resample_to_target(data, source_data, target_shape, target_profile):
     destination = np.zeros(target_shape, dtype=data.dtype)
 
     if target_profile is not None and "transform" in target_profile:
-        reproject(
-            source=data,
-            destination=destination,
-            src_transform=source_data["transform"],
-            src_crs=source_data["crs"],
-            dst_transform=target_profile["transform"],
-            dst_crs=target_profile.get("crs", source_data["crs"]),
-            resampling=Resampling.nearest,
-        )
+        try:
+            reproject(
+                source=data,
+                destination=destination,
+                src_transform=source_data["transform"],
+                src_crs=source_data["crs"],
+                dst_transform=target_profile["transform"],
+                dst_crs=target_profile.get("crs", source_data["crs"]),
+                resampling=Resampling.nearest,
+            )
+        except Exception as e:
+            print(f"     Reprojection error: {e}")
+            
+        # Fallback if reprojection results in mostly empty 'No Data' (failed geographic intersection)
+        zero_ratio = np.count_nonzero(destination == 0) / destination.size
+        if zero_ratio > 0.60:
+            print(f"     ⚠️ Reprojection mapped {zero_ratio*100:.1f}% as 'No Data' (mismatched coordinates). Falling back to direct matrix resize.")
+            row_idx = (np.arange(target_shape[0]) * data.shape[0] / target_shape[0]).astype(int)
+            col_idx = (np.arange(target_shape[1]) * data.shape[1] / target_shape[1]).astype(int)
+            row_idx = np.clip(row_idx, 0, data.shape[0] - 1)
+            col_idx = np.clip(col_idx, 0, data.shape[1] - 1)
+            destination = data[np.ix_(row_idx, col_idx)]
     else:
         # Simple nearest-neighbor resize
         row_idx = (np.arange(target_shape[0]) * data.shape[0] / target_shape[0]).astype(int)
