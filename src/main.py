@@ -278,7 +278,7 @@ def main(satellite_path=None, climate_path=None, worldcover_path=None,
         save_ml_landcover_map(ml_classification)
 
     if fused_classification is not None:
-        save_fused_map(fused_classification)
+        save_fused_map(fused_classification, ml_classification=ml_classification)
 
     # Recommendation map (uses primary classification)
     save_recommendation_map(primary_classification, zone_df, grid_size=grid_size)

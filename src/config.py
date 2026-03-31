@@ -144,7 +144,11 @@ LAND_CLASS_COLORS = RULEBASED_LAND_CLASS_COLORS
 # NDWI THRESHOLD (Water Detection)
 # NDWI = (Green - NIR) / (Green + NIR)
 # ──────────────────────────────────────────────────────────────
-NDWI_WATER_THRESHOLD = 0.3   # Pixels with NDWI > 0.3 are water
+NDWI_WATER_THRESHOLD = 0.1   # Pixels with NDWI > 0.1 are water
+# NOTE: Lowered from 0.3 → 0.1 for semi-arid regions (Sehore/MP).
+# Pure deep-water NDWI > 0.3, but turbid/shallow/mixed-pixel water
+# bodies like Jamonia Dam typically show NDWI 0.1–0.3. Using 0.1
+# ensures they are caught by both K-Means labeling and NDWI refinement.
 
 # ──────────────────────────────────────────────────────────────
 # CLIMATE-BASED FEASIBILITY RULES (EXPANDED for ML classes)

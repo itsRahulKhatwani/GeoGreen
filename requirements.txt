@@ -12,3 +12,4 @@ opencv-python-headless>=4.7.0
 Pillow>=9.0.0
 scipy>=1.9.0
 openpyxl>=3.0.0
+folium>=0.14.0

@@ -113,6 +113,8 @@ def generate_worldcover_from_sentinel2():
 
     print(f"     NDVI range: [{ndvi.min():.3f}, {ndvi.max():.3f}]")
     print(f"     NDWI range: [{ndwi.min():.3f}, {ndwi.max():.3f}]")
+    water_pixels_ndwi = np.count_nonzero(ndwi > 0.0)
+    print(f"     Potential water pixels (NDWI > 0): {water_pixels_ndwi:,} ({water_pixels_ndwi/ndwi.size*100:.1f}%)")
 
     # ── Step 3: Create feature matrix ─────────────────────────
     print("  🔧 Building feature matrix for K-Means...")
@@ -200,16 +202,27 @@ def generate_worldcover_from_sentinel2():
         80: "Water",
     }
 
+    # ── NDWI Pre-pass: explicitly detect water clusters FIRST ────
+    # Water has positive NDWI (Green > NIR) and negative/low NDVI.
+    # We sort clusters by NDWI (descending) so the wettest cluster
+    # gets evaluated first before any NDVI-based logic can steal it.
+    # Threshold: NDWI > 0.0 (positive NDWI strongly indicates water)
+    NDWI_WATER_THRESHOLD = 0.0   # conservative but effective
+
     for ci in cluster_info:
         c = ci["cluster"]
         mask = cluster_labels == c
 
-        # Decision rules based on spectral signatures
-        if ci["ndwi"] > 0.1:
-            # High NDWI → Water
+        # ── Decision rules based on spectral signatures ──────────
+        # PRIORITY 1: NDWI > threshold → Water (always wins)
+        if ci["ndwi"] > NDWI_WATER_THRESHOLD and ci["ndvi"] < 0.2:
+            # Positive NDWI + low NDVI → strong water signal
+            wc_class = 80
+        elif ci["ndwi"] > 0.05:
+            # Moderately positive NDWI → likely water/wetland
             wc_class = 80
         elif ci["ndvi"] < 0.05:
-            # Very low NDVI → Built-up or Bare
+            # Very low NDVI + no water signal → Built-up or Bare
             if ci["blue"] > ci["red"] * 0.8:
                 wc_class = 50  # Built-up (brighter in blue)
             else:

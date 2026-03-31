@@ -424,3 +424,147 @@ def generate_rgb_recommendations(cv_stats, climate_data):
         })
         
     return recs
+
+
+# ──────────────────────────────────────────────────────────────────────
+# ZONE ENRICHMENT — Species + Scheme + Cost + Priority Score
+# ──────────────────────────────────────────────────────────────────────
+
+# Species recommendation matrix:  (soil_type, rainfall_band) → species list
+_SPECIES_MAP = {
+    ("black",    "high"):   ["Teak (Tectona grandis)", "Bamboo (Dendrocalamus strictus)", "Mahua (Madhuca longifolia)", "Arjun (Terminalia arjuna)"],
+    ("black",    "medium"): ["Neem (Azadirachta indica)", "Mahua (Madhuca longifolia)", "Amaltas (Cassia fistula)", "Shisham (Dalbergia sissoo)"],
+    ("black",    "low"):    ["Neem (Azadirachta indica)", "Khejri (Prosopis cineraria)", "Babool (Acacia nilotica)"],
+    ("alluvial", "high"):   ["Teak/Sagwan (Tectona grandis)", "Peepal (Ficus religiosa)", "Arjun (Terminalia arjuna)", "Mango (Mangifera indica)"],
+    ("alluvial", "medium"): ["Mango (Mangifera indica)", "Jamun (Syzygium cumini)", "Drumstick (Moringa oleifera)", "Indian Gooseberry (Amla)"],
+    ("alluvial", "low"):    ["Neem (Azadirachta indica)", "Drumstick (Moringa oleifera)", "Indian Gooseberry (Amla)"],
+    ("laterite", "high"):   ["Sal (Shorea robusta)", "Cashew (Anacardium occidentale)", "Bamboo (Dendrocalamus strictus)", "Kusum (Schleichera oleosa)"],
+    ("laterite", "medium"): ["Neem (Azadirachta indica)", "Babool (Acacia nilotica)", "Indian Gooseberry (Amla)", "Karanj (Millettia pinnata)"],
+    ("laterite", "low"):    ["Neem (Azadirachta indica)", "Babool (Acacia nilotica)", "Khejri (Prosopis cineraria)"],
+    ("sandy",    "high"):   ["Neem (Azadirachta indica)", "Babool (Acacia nilotica)", "Casuarina (Casuarina equisetifolia)", "Eucalyptus"],
+    ("sandy",    "medium"): ["Neem (Azadirachta indica)", "Khejri (Prosopis cineraria)", "Babool (Acacia nilotica)"],
+    ("sandy",    "low"):    ["Khejri (Prosopis cineraria)", "Babool (Acacia nilotica)", "Rohida (Tecomella undulata)"],
+}
+
+# Species overrides per land-cover class (regardless of soil)
+_SPECIES_BY_CLASS = {
+    "Water":     ["Arjun (Terminalia arjuna) — riparian", "Kadam (Neolamarckia cadamba)", "River Acacia", "Vetiver grass (buffer zone)"],
+    "Built-up":  ["Peepal (Ficus religiosa)", "Neem (Azadirachta indica)", "Banyan (Ficus benghalensis)", "Drumstick (Moringa oleifera)"],
+    "Tree Cover":["Existing species — conserve", "Bamboo (understory)", "Native shrubs for understory biodiversity"],
+    "Cropland":  ["Drumstick (Moringa oleifera) — boundary", "Mango (Mangifera indica) — boundary", "Indian Gooseberry (Amla)", "Subabul (Leucaena leucocephala)"],
+}
+
+# Government scheme mapping: (dominant_class_label, priority) → scheme info
+_SCHEME_MAP = {
+    ("Grassland",    "High"):   {"scheme": "Green India Mission (GIM) / CAMPA Fund",         "authority": "MoEFCC / State Forest Dept", "type": "Afforestation",              "rate_per_ha": 45000},
+    ("Grassland",    "Medium"): {"scheme": "CAMPA Fund",                                       "authority": "State Forest Department",    "type": "Ecological Restoration",     "rate_per_ha": 32000},
+    ("Shrubland",    "High"):   {"scheme": "Green India Mission (GIM)",                        "authority": "MoEFCC",                     "type": "Forest Upgradation",         "rate_per_ha": 35000},
+    ("Cropland",     "High"):   {"scheme": "PMKSY (Har Khet Ko Paani) + RKVY",                "authority": "Ministry of Agriculture",    "type": "Soil Restoration + Irrigation","rate_per_ha": 28000},
+    ("Cropland",     "Medium"): {"scheme": "RKVY (Rashtriya Krishi Vikas Yojana)",            "authority": "Ministry of Agriculture",    "type": "Agroforestry",               "rate_per_ha": 20000},
+    ("Built-up",     "Medium"): {"scheme": "Smart Cities Mission / AMRUT 2.0",                "authority": "MoHUA",                      "type": "Urban Greening",             "rate_per_ha": 30000},
+    ("Built-up",     "High"):   {"scheme": "Smart Cities Mission / AMRUT 2.0",                "authority": "MoHUA",                      "type": "Urban Greening",             "rate_per_ha": 30000},
+    ("Water",        "High"):   {"scheme": "Amrit Sarovar Mission + MGNREGS",                 "authority": "Ministry of Jal Shakti",     "type": "Desilting + Buffer Zones",   "rate_per_ha": 15000},
+    ("Water",        "Medium"): {"scheme": "MGNREGS / National Water Mission",                "authority": "Ministry of Jal Shakti",     "type": "Water Body Rejuvenation",    "rate_per_ha": 12000},
+    ("Tree Cover",   "Low"):    {"scheme": "Joint Forest Management (JFM) / Van Dhan Yojana", "authority": "State Forest Department",    "type": "Conservation & Monitoring",  "rate_per_ha":  8000},
+    ("Bare / Sparse","High"):   {"scheme": "Green India Mission (GIM) / CAMPA Fund",          "authority": "MoEFCC / State Forest Dept", "type": "Wasteland Development",      "rate_per_ha": 40000},
+    ("Bare / Sparse","Medium"): {"scheme": "CAMPA Fund / National Afforestation Programme",   "authority": "State Forest Department",    "type": "Afforestation",              "rate_per_ha": 30000},
+}
+
+_DEFAULT_SCHEME = {"scheme": "State Forest Department Budget", "authority": "District Collector", "type": "General Greening", "rate_per_ha": 20000}
+
+_PRIORITY_SCORE = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
+
+
+def enrich_zone_recommendations(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enrich zone-level recommendations with:
+
+    1. **Native species suggestions** — based on soil type, annual rainfall
+       band, and dominant land-cover class (so each zone gets specific
+       tree/plant names, not just a generic action).
+
+    2. **Government scheme linkages** — maps each (land-cover, priority)
+       combination to the relevant central or state government scheme
+       (CAMPA, GIM, PMKSY, MGNREGS, Amrit Sarovar, etc.) along with
+       the responsible authority.
+
+    3. **Estimated implementation cost** — ₹/hectare × zone area to give
+       district planners a rough budget figure.
+
+    4. **Numeric priority score** — so the table can be sorted by urgency.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Output of generate_recommendations_ml() — must include columns:
+        dominant_class_label, soil_type, rainfall_mm, priority, bare_pct,
+        vegetation_pct, mean_ndvi, row_start, col_start.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same dataframe with added columns:
+        species, scheme, authority, intervention_type, rate_per_ha,
+        zone_area_ha, est_cost_inr, est_cost_lakhs, priority_score.
+    """
+    ZONE_PIXEL_SIDE = 50        # zone grid is 50×50 pixels
+    PIXEL_RESOLUTION = 10       # Sentinel-2 L2A = 10 m/pixel
+    zone_area_m2 = (ZONE_PIXEL_SIDE * PIXEL_RESOLUTION) ** 2
+    zone_area_ha = zone_area_m2 / 10_000  # 1 ha = 10,000 m²
+
+    species_list, schemes, authorities, int_types = [], [], [], []
+    rates, costs_inr, costs_lakh, scores = [], [], [], []
+
+    for _, row in df.iterrows():
+        dom_class   = str(row.get("dominant_class_label", "Grassland"))
+        soil        = str(row.get("soil_type", "alluvial")).lower().strip()
+        rainfall    = float(row.get("rainfall_mm", 800))
+        priority    = str(row.get("priority", "None"))
+        veg_pct     = float(row.get("vegetation_pct", 0))
+        bare_pct    = float(row.get("bare_pct", 0))
+
+        # ── 1. Species ────────────────────────────────────────────────
+        if dom_class in _SPECIES_BY_CLASS:
+            sp = _SPECIES_BY_CLASS[dom_class]
+        else:
+            # Rainfall band: high>900, medium 500–900, low<500
+            rain_band = "high" if rainfall >= 900 else ("medium" if rainfall >= 500 else "low")
+            sp = _SPECIES_MAP.get((soil, rain_band),
+                 _SPECIES_MAP.get(("alluvial", rain_band),
+                 ["Neem (Azadirachta indica)", "Peepal (Ficus religiosa)", "Babool (Acacia nilotica)"]))
+        species_list.append(" · ".join(sp[:3]))      # show top-3
+
+        # ── 2. Scheme ────────────────────────────────────────────────
+        scheme_info = _SCHEME_MAP.get((dom_class, priority), _DEFAULT_SCHEME)
+        schemes.append(scheme_info["scheme"])
+        authorities.append(scheme_info["authority"])
+        int_types.append(scheme_info["type"])
+        rate = scheme_info["rate_per_ha"]
+        rates.append(rate)
+
+        # ── 3. Cost ──────────────────────────────────────────────────
+        # Scale cost by how degraded the zone is (bare % contributes more)
+        degradation_factor = min(1.0, (bare_pct / 100) + (1 - veg_pct / 100) * 0.5)
+        effective_rate = rate * max(0.3, degradation_factor)
+        cost_inr = effective_rate * zone_area_ha
+        costs_inr.append(int(cost_inr))
+        costs_lakh.append(round(cost_inr / 1e5, 2))
+
+        # ── 4. Priority score ────────────────────────────────────────
+        base = _PRIORITY_SCORE.get(priority, 0)
+        ndvi_penalty = max(0, 0.4 - float(row.get("mean_ndvi", 0.4)))  # low NDVI = bad
+        score = base + ndvi_penalty + bare_pct / 100
+        scores.append(round(score, 3))
+
+    df = df.copy()
+    df["species"]           = species_list
+    df["scheme"]            = schemes
+    df["authority"]         = authorities
+    df["intervention_type"] = int_types
+    df["rate_per_ha"]       = rates
+    df["zone_area_ha"]      = round(zone_area_ha, 2)
+    df["est_cost_inr"]      = costs_inr
+    df["est_cost_lakhs"]    = costs_lakh
+    df["priority_score"]    = scores
+
+    return df

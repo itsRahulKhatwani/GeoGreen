@@ -98,13 +98,14 @@ def _classify_pixels(img_bgr):
     labels[veg_mask] = 0
 
     # ── 2. WATER ────────────────────────────────────────────────────
-    # Blue hue OR very dark (deep water)
-    # HSV: H in [85, 140], S > 20, V > 15
-    # Also: dark pixels with low saturation (deep water appears nearly black)
+    # Blue hue: H in [85, 140], S > 20, V > 15
+    # Blue-dominant pixels (Blue channel clearly exceeds Red and Green)
     water_mask = (
         ((H >= 85) & (H <= 140) & (S >= 20) & (V >= 15)) |
-        ((V < 45) & (S < 60)) |  # Very dark = deep water
-        ((Bl > R + 20) & (Bl > G + 10) & (S > 25))  # Blue dominant
+        # Very dark AND blue-dominant (deep/turbid water, NOT roads/shadows)
+        ((V < 45) & (S < 60) & (Bl > R + 10)) |
+        # Blue channel dominates significantly (e.g. clear water bodies)
+        ((Bl > R + 30) & (Bl > G + 15) & (S > 25))
     )
     labels[water_mask] = 1
 
@@ -117,11 +118,13 @@ def _classify_pixels(img_bgr):
         (exg < 0.02) &
         (~veg_mask) & (~water_mask)
     )
-    # Also: bluish-grey rooftops common in Indian cities
+    # Bluish-grey rooftops common in Indian cities — but NOT water
+    # Tighten: require low saturation (< 40) so true water (S > 40) is excluded
     bluegrey_mask = (
         (H >= 90) & (H <= 130) &
-        (S >= 10) & (S <= 50) &
-        (V >= 80) & (V <= 200)
+        (S >= 10) & (S <= 40) &
+        (V >= 80) & (V <= 200) &
+        (~water_mask)   # ← critical: don't steal water pixels
     )
     labels[buildup_mask | bluegrey_mask] = 2
 
@@ -129,6 +132,7 @@ def _classify_pixels(img_bgr):
     # Warm tones (yellow/brown/tan), or anything not classified above
 
     return labels
+
 
 
 CLASS_NAMES = ["Vegetation", "Water", "Built-up", "Bare/Sparse"]

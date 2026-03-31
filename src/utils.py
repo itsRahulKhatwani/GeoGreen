@@ -185,10 +185,10 @@ def save_ml_landcover_map(ml_classification, output_path=None):
 # ──────────────────────────────────────────────────────────────
 # FUSED CLASSIFICATION MAP (NEW)
 # ──────────────────────────────────────────────────────────────
-def save_fused_map(fused_classification, output_path=None):
+def save_fused_map(fused_classification, ml_classification=None, output_path=None):
     """
-    Generate and save the FUSED land-cover map
-    (ML + NDVI/NDWI refinement).
+    Generate and save the FUSED land-cover map showing NDVI/NDWI refinements.
+    Shows a side-by-side: left = ML raw, right = Fused, with a difference overlay.
     """
     ensure_output_dir()
     if output_path is None:
@@ -197,27 +197,72 @@ def save_fused_map(fused_classification, output_path=None):
     colors = [ML_LAND_CLASS_COLORS[i] for i in range(8)]
     cmap = ListedColormap(colors)
 
-    fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE)
-    im = ax.imshow(fused_classification, cmap=cmap, vmin=-0.5, vmax=7.5,
-                   interpolation="nearest")
+    if ml_classification is not None:
+        # Side-by-side comparison figure
+        fig, axes = plt.subplots(1, 3, figsize=(22, 7))
 
-    patches = []
-    for k in sorted(ML_LAND_CLASS_LABELS.keys()):
-        if k == 0 and np.count_nonzero(fused_classification == 0) == 0:
-            continue
-        patches.append(
+        # Left: Raw ML
+        axes[0].imshow(ml_classification, cmap=cmap, vmin=-0.5, vmax=7.5,
+                       interpolation="nearest")
+        axes[0].set_title("ML Classification\n(ESA WorldCover — raw)",
+                          fontsize=13, fontweight="bold")
+        axes[0].set_xlabel("Column (pixels)")
+        axes[0].set_ylabel("Row (pixels)")
+
+        # Middle: Fused
+        axes[1].imshow(fused_classification, cmap=cmap, vmin=-0.5, vmax=7.5,
+                       interpolation="nearest")
+        patches = []
+        for k in sorted(ML_LAND_CLASS_LABELS.keys()):
+            if np.count_nonzero(fused_classification == k) == 0:
+                continue
+            patches.append(mpatches.Patch(color=ML_LAND_CLASS_COLORS[k],
+                                          label=ML_LAND_CLASS_LABELS[k]))
+        axes[1].legend(handles=patches, loc="lower right", fontsize=8,
+                       framealpha=0.9, title="Land Cover Classes", title_fontsize=9)
+        axes[1].set_title("Fused Classification\n(ML + NDVI/NDWI Refinement)",
+                          fontsize=13, fontweight="bold", color="#1a6e2e")
+        axes[1].set_xlabel("Column (pixels)")
+
+        # Right: Difference (changed pixels highlighted)
+        diff = (ml_classification != fused_classification).astype(np.uint8)
+        n_changed = int(np.count_nonzero(diff))
+        pct_changed = n_changed / diff.size * 100
+        diff_cmap = ListedColormap(["#1e2836", "#ff6b35"])  # unchanged=dark, changed=orange
+        axes[2].imshow(diff, cmap=diff_cmap, vmin=0, vmax=1, interpolation="nearest")
+        axes[2].set_title(
+            f"Index-Refined Pixels\n{n_changed:,} pixels changed ({pct_changed:.1f}%)",
+            fontsize=13, fontweight="bold", color="#ff6b35"
+        )
+        axes[2].set_xlabel("Column (pixels)")
+        diff_patches = [
+            mpatches.Patch(color="#1e2836", label="Unchanged (ML = Fused)"),
+            mpatches.Patch(color="#ff6b35", label="Refined by NDVI/NDWI"),
+        ]
+        axes[2].legend(handles=diff_patches, loc="lower right", fontsize=9,
+                       framealpha=0.9)
+
+        fig.suptitle(
+            "Fused Land-Cover Map — ESA WorldCover ML + Spectral Index Refinement",
+            fontsize=15, fontweight="bold", y=1.01
+        )
+    else:
+        # Fallback: single panel
+        fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE)
+        ax.imshow(fused_classification, cmap=cmap, vmin=-0.5, vmax=7.5,
+                  interpolation="nearest")
+        patches = [
             mpatches.Patch(color=ML_LAND_CLASS_COLORS[k],
                            label=ML_LAND_CLASS_LABELS[k])
-        )
-    ax.legend(handles=patches, loc="lower right", fontsize=9, framealpha=0.9,
-              title="Fused Land Cover (ML + Indices)", title_fontsize=10)
-
-    ax.set_title(
-        "Fused Land-Cover Map — ML Classification + Spectral Index Refinement",
-        fontsize=14, fontweight="bold"
-    )
-    ax.set_xlabel("Column (pixels)", fontsize=11)
-    ax.set_ylabel("Row (pixels)", fontsize=11)
+            for k in sorted(ML_LAND_CLASS_LABELS.keys())
+            if np.count_nonzero(fused_classification == k) > 0
+        ]
+        ax.legend(handles=patches, loc="lower right", fontsize=9, framealpha=0.9,
+                  title="Fused Land Cover (ML + Indices)", title_fontsize=10)
+        ax.set_title("Fused Land-Cover Map — ML + Spectral Index Refinement",
+                     fontsize=14, fontweight="bold")
+        ax.set_xlabel("Column (pixels)")
+        ax.set_ylabel("Row (pixels)")
 
     plt.tight_layout()
     fig.savefig(output_path, dpi=OUTPUT_DPI, bbox_inches="tight")
