@@ -16,8 +16,7 @@ India is facing declining green cover, underutilized rural land, and increasing 
 
 ---
 
-## 🧠 System Architecture
-
+## 🧠 System Architecture - Flowchart
 ```
 Sentinel-2 L2A Image (Real)          ESA WorldCover Map (Pretrained DL Model)
        │                                        │
