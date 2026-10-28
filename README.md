@@ -1,6 +1,6 @@
 # 🌿 GeoGreen Revolution — AI-Powered Geospatial Decision Support System!!
 
-## 📌 Project Overview
+## 📌 Project Overview(important)
 
 India is facing declining green cover, underutilized rural land, and increasing urban heat. **GeoGreen Revolution** is an AI-powered geospatial system that uses **real satellite imagery** and a **pretrained deep learning model** to:
 
